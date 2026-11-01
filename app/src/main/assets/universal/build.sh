@@ -12,12 +12,21 @@ mkdir -p "$OUT"
 echo "[build] framework=$FRAMEWORK tipe=$BT root=$PROJECT_ROOT"
 
 sdk_prepare() {
-  if [ -n "${ANDROID_HOME:-}" ] && command -v sdkmanager >/dev/null 2>&1; then
-    yes | sdkmanager --licenses >/dev/null 2>&1 || true
+  # Memakai Android SDK bawaan runner ubuntu-latest (tanpa action pihak ketiga).
+  export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+  export ANDROID_SDK_ROOT="$ANDROID_HOME"
+  local sdkm bt
+  sdkm="$(command -v sdkmanager || ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -1 || true)"
+  bt="$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -1 || true)"
+  [ -n "$bt" ] && export PATH="$bt:$PATH"
+  if [ -n "$sdkm" ]; then
+    yes | "$sdkm" --licenses >/dev/null 2>&1 || true
     if [ "${NEED_NDK:-false}" = "true" ]; then
       echo "[build] Memasang NDK dan CMake"
-      sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1" >/dev/null
+      "$sdkm" --install "ndk;26.1.10909125" "cmake;3.22.1" >/dev/null
     fi
+  else
+    echo "[build] PERINGATAN: sdkmanager tidak ditemukan di $ANDROID_HOME"
   fi
 }
 
@@ -120,7 +129,21 @@ case "$FRAMEWORK" in
   android-kotlin|android-java|android-ndk)
     gradle_run "$WS/$PROJECT_ROOT" ;;
   flutter)
-    cd "$WS/$PROJECT_ROOT"; flutter pub get; flutter build apk "--$BT" ;;
+    cd "$WS/$PROJECT_ROOT"
+    if [ -f scripts/bootstrap-android.sh ]; then
+      echo "[build] Menjalankan scripts/bootstrap-android.sh milik project"
+      sudo ln -sfn "$PWD" /work
+      touch "$HOME/.wp-env"
+      bash scripts/bootstrap-android.sh
+    elif [ ! -d android ]; then
+      echo "[build] Folder android/ tidak ada, dibuat dengan flutter create"
+      pname="$(grep -m1 '^name:' pubspec.yaml | awk '{print $2}')"
+      flutter create --platforms android --org com.example --project-name "$pname" .
+    fi
+    flutter pub get
+    DEFS=""
+    if [ -f env.json ]; then DEFS="--dart-define-from-file=env.json"; fi
+    flutter build apk "--$BT" $DEFS ;;
   react-native|expo)
     cd "$WS/$PROJECT_ROOT"; npm_install
     if [ ! -d android ]; then

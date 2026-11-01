@@ -111,9 +111,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _testing.value = true
             _test.value = try {
                 val tk = tokenInput.ifBlank { Graph.settings.token() } ?: error("Token belum diisi.")
-                var u = user.trim(); var r = repo.trim()
-                if (r.contains("/")) { u = r.substringBefore("/"); r = r.substringAfter("/") }
-                val api = GitHubApi({ tk }, u, r.removeSuffix(".git"))
+                val norm = { x: String -> x.trim().removePrefix("https://").removePrefix("http://").removePrefix("www.").removePrefix("github.com/").trim('/').removeSuffix(".git") }
+                var u = norm(user); var r = norm(repo)
+                if (u.contains('/')) { val p = u.split('/').filter { it.isNotBlank() }; u = p[0]; if (r.isBlank() && p.size > 1) r = p[1] }
+                if (r.contains('/')) { val p = r.split('/').filter { it.isNotBlank() }; if (p.size >= 2) { u = p[0]; r = p[1] } }
+                val api = GitHubApi({ tk }, u, r)
                 val info = api.repoInfo()
                 api.branchHead(branch.trim().ifBlank { "main" })
                 if (info.optJSONObject("permissions")?.optBoolean("push") == false)

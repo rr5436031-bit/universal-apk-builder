@@ -65,10 +65,6 @@ jobs:
           distribution: temurin
           java-version: ${{ steps.detect.outputs.java }}
 
-      - name: Setup Android SDK
-        if: steps.detect.outputs.android == 'true'
-        uses: android-actions/setup-android@v3
-
       - name: Setup Node.js
         if: steps.detect.outputs.node != ''
         uses: actions/setup-node@v4

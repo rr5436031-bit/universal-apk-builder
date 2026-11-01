@@ -55,8 +55,10 @@ def extract():
         if re.search(r"(?i)\b(error|exception|failed)\b", line) and not line.startswith("[detect]") \
                 and not re.search(r"(?i)\b0 errors?\b", line):
             return "Build failed", line.strip(), None, None
-    tail = [l for l in log if l.strip()]
-    return "Build failed", (tail[-1] if tail else "Tidak ada output log"), None, None
+    tail = [l for l in log if l.strip() and not l.startswith("[detect]")]
+    if not tail:
+        return "Build failed", "Gagal sebelum langkah build dimulai (persiapan environment: JDK/Android SDK/Flutter/Node). Lihat log job di GitHub Actions.", None, None
+    return "Build failed", tail[-1], None, None
 
 
 err = {"summary": None, "message": None, "file": None, "line": None, "cause": None}

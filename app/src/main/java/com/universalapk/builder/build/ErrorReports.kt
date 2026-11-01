@@ -57,4 +57,21 @@ object ErrorReports {
         }
         return obj(rec.projectName, rec.framework, rec.buildType, runId, rec.runNumber, summary, message, null, null, null, logLines.takeLast(300))
     }
+
+    /** Melengkapi laporan dengan step yang gagal dan baris ##[error] dari log job GitHub (termasuk step persiapan). */
+    fun enrich(json: JSONObject, step: String?, lines: List<String>): JSONObject {
+        val errs = lines.filter { it.contains("##[error]") }.map { it.substringAfter("##[error]").trim() }.filter { it.isNotBlank() }
+        val e = json.getJSONObject("error")
+        val old = e.s("message").orEmpty()
+        val weak = old.isBlank() || old.startsWith("[detect]") || old.startsWith("[build]") || old.startsWith("Gagal sebelum langkah build")
+        if (weak && (errs.isNotEmpty() || step != null)) {
+            val m = buildString {
+                if (step != null) append("Step \"$step\" gagal. ")
+                append(errs.take(3).joinToString(" "))
+            }.trim()
+            e.put("message", m)
+        }
+        if (lines.isNotEmpty()) json.put("build_log", JSONArray(lines.takeLast(300)))
+        return json
+    }
 }

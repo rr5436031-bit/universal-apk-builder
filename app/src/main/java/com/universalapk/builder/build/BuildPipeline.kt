@@ -176,21 +176,21 @@ class BuildPipeline(private val ctx: Context) {
     private suspend fun onFailure(api: GitHubApi, rec: BuildRecord, runId: Long, conclusion: String, jobs: JSONArray) {
         val arts = runCatching { api.listArtifacts(runId) }.getOrNull()
         val report = arts?.let { ArtifactDownloader(ctx, api).readReport(it, runId) }
-        val json = if (report != null) ErrorReports.fromReport(report, rec, runId) else {
-            var step: String? = null
-            var lines = emptyList<String>()
-            val job = jobs.optJSONObject(0)
-            val ss = job?.optJSONArray("steps")
-            if (ss != null) for (i in 0 until ss.length()) {
-                val s = ss.getJSONObject(i)
-                if (s.optString("conclusion") == "failure") { step = s.optString("name"); break }
-            }
-            if (job != null) {
-                val raw = runCatching { api.jobLogs(job.getLong("id")) }.getOrDefault("")
-                lines = raw.lines().map { it.replace(Regex("^\\d{4}-\\d\\d-\\d\\dT[\\d:.]+Z "), "") }.filter { it.isNotBlank() }.takeLast(300)
-            }
-            ErrorReports.fallback(rec, runId, conclusion, step, lines)
+        var step: String? = null
+        var lines = emptyList<String>()
+        val job = jobs.optJSONObject(0)
+        val ss = job?.optJSONArray("steps")
+        if (ss != null) for (i in 0 until ss.length()) {
+            val s = ss.getJSONObject(i)
+            if (s.optString("conclusion") == "failure") { step = s.optString("name"); break }
         }
+        if (job != null) {
+            val raw = runCatching { api.jobLogs(job.getLong("id")) }.getOrDefault("")
+            lines = raw.lines().map { it.replace(Regex("^\\uFEFF?\\d{4}-\\d\\d-\\d\\dT[\\d:.]+Z "), "") }.filter { it.isNotBlank() }
+        }
+        val base = if (report != null) ErrorReports.fromReport(report, rec, runId)
+                   else ErrorReports.fallback(rec, runId, conclusion, step, lines)
+        val json = ErrorReports.enrich(base, step, lines)
         val summary = json.optJSONObject("error")?.optString("summary") ?: "Build failed"
         history.update(rec.id) {
             it.copy(status = BuildStatus.FAILED, finishedAt = System.currentTimeMillis(), message = summary, errorJson = json.toString(2))

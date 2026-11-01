@@ -25,11 +25,22 @@ class SettingsStore(context: Context, private val secure: SecureStore) {
 
     fun token(): String? = secure.token()
 
+    private fun norm(s: String) = s.trim().removePrefix("https://").removePrefix("http://")
+        .removePrefix("www.").removePrefix("github.com/").trim('/').removeSuffix(".git")
+
+    /** Menerima username/repo dalam bentuk URL lengkap, owner/repo, atau terpisah. */
     fun save(username: String, repo: String, branch: String, newToken: String?) {
-        var u = username.trim()
-        var r = repo.trim()
-        if (r.contains("/")) { u = r.substringBefore("/").ifBlank { u }; r = r.substringAfter("/") }
-        r = r.removeSuffix(".git")
+        var u = norm(username)
+        var r = norm(repo)
+        if (u.contains('/')) {
+            val p = u.split('/').filter { it.isNotBlank() }
+            u = p[0]
+            if (r.isBlank() && p.size > 1) r = p[1]
+        }
+        if (r.contains('/')) {
+            val p = r.split('/').filter { it.isNotBlank() }
+            if (p.size >= 2) { u = p[0]; r = p[1] } else r = p.firstOrNull().orEmpty()
+        }
         prefs.edit().putString("username", u).putString("repo", r)
             .putString("branch", branch.trim().ifBlank { "main" }).apply()
         if (!newToken.isNullOrBlank()) secure.saveToken(newToken)
