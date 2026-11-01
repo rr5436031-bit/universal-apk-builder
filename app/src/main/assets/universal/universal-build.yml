@@ -1,0 +1,152 @@
+name: Universal APK Build
+run-name: Build ${{ inputs.project_name }} [${{ inputs.client_id }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_path:
+        description: Folder project di repository
+        required: true
+        type: string
+      build_type:
+        description: debug atau release
+        required: true
+        default: debug
+        type: choice
+        options: [debug, release]
+      project_name:
+        description: Nama project
+        required: true
+        type: string
+      client_id:
+        description: ID unik dari aplikasi Android
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PROJECT_PATH: ${{ inputs.project_path }}
+      BUILD_TYPE: ${{ inputs.build_type }}
+      PROJECT_NAME: ${{ inputs.project_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/universal
+            ${{ inputs.project_path }}
+          sparse-checkout-cone-mode: false
+
+      - name: Detect project
+        id: detect
+        run: |
+          touch "$RUNNER_TEMP/build.stamp"
+          mkdir -p out
+          python3 .github/universal/detect.py "$PROJECT_PATH" 2>&1 | tee -a build.log
+
+      - name: Project tidak didukung
+        if: steps.detect.outputs.supported != 'true'
+        env:
+          REASON: ${{ steps.detect.outputs.reason }}
+        run: |
+          echo "Project tidak didukung: $REASON" | tee -a build.log
+          exit 1
+
+      - name: Setup JDK
+        if: steps.detect.outputs.supported == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ steps.detect.outputs.java }}
+
+      - name: Setup Android SDK
+        if: steps.detect.outputs.android == 'true'
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Node.js
+        if: steps.detect.outputs.node != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.detect.outputs.node }}
+
+      - name: Setup Flutter
+        if: steps.detect.outputs.flutter == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Setup .NET
+        if: steps.detect.outputs.dotnet == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      - name: Cek lisensi Unity
+        if: steps.detect.outputs.framework == 'unity'
+        env:
+          HAS_LICENSE: ${{ secrets.UNITY_LICENSE != '' }}
+        run: |
+          if [ "$HAS_LICENSE" != "true" ]; then
+            echo "Unity memerlukan secret UNITY_LICENSE (dan UNITY_EMAIL, UNITY_PASSWORD) di repository." | tee -a build.log
+            exit 1
+          fi
+
+      - name: Build Unity (game-ci)
+        if: steps.detect.outputs.framework == 'unity'
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: ${{ steps.detect.outputs.root }}
+          targetPlatform: Android
+          androidExportType: androidPackage
+          buildsPath: build
+
+      - name: Build APK
+        if: steps.detect.outputs.supported == 'true'
+        env:
+          FRAMEWORK: ${{ steps.detect.outputs.framework }}
+          PROJECT_ROOT: ${{ steps.detect.outputs.root }}
+          NEED_NDK: ${{ steps.detect.outputs.ndk }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: bash .github/universal/build.sh 2>&1 | tee -a build.log
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ github.run_id }}
+          path: out/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Buat laporan
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: python3 .github/universal/make_report.py
+
+      - name: Upload laporan dan log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ github.run_id }}
+          path: |
+            report.json
+            build.log
+          if-no-files-found: ignore
+          retention-days: 14
